@@ -1,3 +1,14 @@
+2003-06-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
+
+	* New Release INET6-1.27.
+	* t/io_sock_inet6.t: New file for 'make test'.
+
+2003-06-14  Rafael Martinez Torres <rafael.martinez@novagnet.com>
+
+	* Patch from Masahito Omote <omote@debian.org>.
+	  - Fix IPv6 address and port splitt bug.
+	  - Fix _get_addr in INET6.pm to use Socket6::getaddrinfo.
+
 2003-06-05  Rafael Martinez Torres <rafael.martinez@novagnet.com>
 
 	* Inital CPAN release.

@@ -18,7 +18,7 @@ use Exporter;
 use Errno;
 
 @ISA = qw(IO::Socket);
-$VERSION = "1.26";
+$VERSION = "1.27";
 
 my $EINVAL = exists(&Errno::EINVAL) ? Errno::EINVAL() : 1;
 
@@ -42,11 +42,16 @@ sub _sock_info {
   my @serv = ();
 
   if (defined $addr) {
-     if ($addr =~ s,^\[([\da-fA-F:]+)\]:([\w\(\)/]+)$,$1,) {
-   	 $port = $2;
-     }
-     elsif ( $addr =~ s,:([\w\(\)/]+)$,,) {
-         $port = $1
+     if(!inet_pton(AF_INET6, $addr)) {
+         if($addr =~ s,^\[([\da-fA-F:]+)\]:([\w\(\)/]+)$,$1,) {
+   	     $port = $2;
+         } elsif($addr =~ s,^\[(::[\da-fA-F.:]+)\]:([\w\(\)/]+)$,$1,) {
+             $port = $2;
+         } elsif($addr =~ s,^\[([\da-fA-F:]+)\],$1,) {
+             $port = $origport;
+         } elsif($addr =~ s,:([\w\(\)/]+)$,,) {
+             $port = $1
+         }
      }
   }
 
@@ -98,13 +103,19 @@ sub _error {
 }
 
 sub _get_addr {
-    my($sock,$addr_str, $multi) = @_;
+    my($sock, $addr_str, $port, $type, $multi) = @_;
     my @addr;
-    if ($multi && $addr_str !~ /^\d+(?:\.\d+){3}$/) {
-	(undef, undef, undef, undef, @addr) = getaddrinfo($addr_str,AF_INET6,AI_DEFAULT);
+
+    if ($addr_str !~ /^\d+(?:\.\d+){3}$/) {
+	@addr = getaddrinfo($addr_str, $port, AF_UNSPEC, $type, (AI_CANONNAME | AI_NUMERICHOST));
     } else {
-	my $h = inet_pton(AF_INET6,$addr_str);
-	push(@addr, $h) if defined $h;
+	@addr = getaddrinfo($addr_str, $port, AF_INET, $type, (AI_NUMERICHOST| AI_CANONNAME));
+    }
+
+    if (!$multi) {
+	my($family, $type, $protocol, $saddr, $canonname);
+	($family, $type, $protocol, $saddr, $canonname, @addr) = @addr;
+	@addr = ($family, $type, $protocol, $saddr, $canonname);
     }
     @addr;
 }
@@ -122,7 +133,8 @@ sub configure {
 					$arg->{Proto})
 			or return _error($sock, $!, $@);
 
-    $laddr = defined $laddr ? inet_pton(AF_INET6,$laddr)
+    # Hack: localhost doesnot seem to reolve in IPv6.
+    $laddr = (defined $laddr) && ($laddr ne 'localhost') ? inet_pton(AF_INET6,$laddr)
 			    : in6addr_any;
 
     return _error($sock, $EINVAL, "Bad hostname '",$arg->{LocalAddr},"'")
@@ -145,17 +157,24 @@ sub configure {
     my $pname = (getprotobynumber($proto))[0];
     $type = $arg->{Type} || $socket_type{$pname};
 
-    my @raddr = ();
+    my @addr = ();
 
     if(defined $raddr) {
-	@raddr = $sock->_get_addr($raddr, $arg->{MultiHomed});
+	@addr = $sock->_get_addr($raddr, $rport, $type, $arg->{MultiHomed});
 	return _error($sock, $EINVAL, "Bad hostname '",$arg->{PeerAddr},"'")
-	    unless @raddr;
+	    unless(scalar(@addr) >= 5);
+    }
+    else {
+	@addr = $sock->_get_addr($laddr, $lport, $type, $arg->{MultiHomed});
+	return _error($sock, $EINVAL, "Bad hostname '",$arg->{LocalAddr},"'")
+	    unless(scalar(@addr) >= 5);
     }
 
     while(1) {
+	my ($family, $type, $protocol, $saddr, $canonname);
+	($family, $type, $protocol, $saddr, $canonname, @addr) = @addr;
 
-	$sock->socket(AF_INET6, $type, $proto) or
+	$sock->socket($family, $type, $protocol) or
 	    return _error($sock, $!, "$!");
 
 	if ($arg->{Reuse} || $arg->{ReuseAddr}) {
@@ -187,8 +206,6 @@ sub configure {
  	# don't try to connect unless we're given a PeerAddr
  	last unless exists($arg->{PeerAddr});
  
-        $raddr = shift @raddr;
-
 	return _error($sock, $EINVAL, 'Cannot determine remote port')
 		unless($rport || $type == SOCK_DGRAM || $type == SOCK_RAW);
 
@@ -202,13 +219,14 @@ sub configure {
 #        my $before = time() if $timeout;
 
 	undef $@;
-        if ($sock->connect(pack_sockaddr_in6($rport, $raddr))) {
+#        if ($sock->connect(pack_sockaddr_in6($rport, $raddr))) {
 #            ${*$sock}{'io_socket_timeout'} = $timeout;
+	if ($sock->connect($saddr)) {
             return $sock;
         }
 
 	return _error($sock, $!, $@ || "Timeout")
-	    unless @raddr;
+	    unless (scalar(@addr) >= 5);
 
 #	if ($timeout) {
 #	    my $new_timeout = $timeout - (time() - $before);
