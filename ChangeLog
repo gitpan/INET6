@@ -1,3 +1,12 @@
+2003-11-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
+
+	* New Release INET6-2.00 . Protocol independent IPv4-IPv6.
+	* New paramter: Domain => AF_UNSPEC(def.),AF_INET,AF_INET6
+	* Replace _get_addr by getnameinfo()
+		 (RFC3493 deprecates getipnodeby() )
+	* sockaddr,peeraddr methods eliminated, (non IP-independent)
+	* Improved test.
+
 2003-07-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
 
 	* New Release INET6-1.28

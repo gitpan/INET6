@@ -7,22 +7,28 @@
 # Modified by Rafael Martinez-Torres <rafael.martinez@novagnet.com>
 # Euro6IX project (www.euro6ix.org) 2003.
 
+# Habrá que tocar algo de los metodos redefinidos por Socket
+# Los UDP no van nada bien.
+
 package IO::Socket::INET6;
 
 use strict;
 our(@ISA, $VERSION);
 use IO::Socket;
+use Socket;
 use Socket6;
 use Carp;
 use Exporter;
 use Errno;
 
 @ISA = qw(IO::Socket);
-$VERSION = "1.28";
+$VERSION = "2.00";
+#Purpose: allow protocol independent protocol and original interface.
 
 my $EINVAL = exists(&Errno::EINVAL) ? Errno::EINVAL() : 1;
 
 IO::Socket::INET6->register_domain( AF_INET6 );
+
 
 my %socket_type = ( tcp  => SOCK_STREAM,
 		    udp  => SOCK_DGRAM,
@@ -35,26 +41,21 @@ sub new {
     return $class->SUPER::new(@_);
 }
 
+#Parsing analisis:
+# addr,port,and proto may be sintactically related...
 sub _sock_info {
   my($addr,$port,$proto) = @_;
   my $origport = $port;
-  my @proto = ();
+  my @proto = ();  
   my @serv = ();
 
-  if (defined $addr) {
-	if (!inet_pton(AF_INET6,$addr)) {
-         if($addr =~ s,^\[([\da-fA-F:]+)\]:([\w\(\)/]+)$,$1,) {
-   	     $port = $2;
-         } elsif($addr =~ s,^\[(::[\da-fA-F.:]+)\]:([\w\(\)/]+)$,$1,) {
-             $port = $2;
-         } elsif($addr =~ s,^\[([\da-fA-F:]+)\],$1,) {
-             $port = $origport;
-         } elsif($addr =~ s,:([\w\(\)/]+)$,,) {
-             $port = $1
-         }
-	}
-  }
 
+ $port = $1 
+	if(defined $addr && $addr =~ s,:([\w\(\)/^\]]+)$,,);   # Make sure the symbol ":" does not belong to the IPv6 address.
+  # Trailing eventual brackets from IPv6 address;
+  $addr =~ s/[\[\]]//g if defined $addr;
+
+  # $proto as "string".
   if(defined $proto  && $proto =~ /\D/) {
     if(@proto = getprotobyname($proto)) {
       $proto = $proto[2] || undef;
@@ -81,11 +82,13 @@ sub _sock_info {
     $proto = (getprotobyname($serv[3]))[2] || undef
 	if @serv && !$proto;
   }
+ #printf "Selected port  is $port and proto is $proto \n";
 
  return ($addr || undef,
 	 $port || undef,
-	 $proto || undef
+	 $proto || undef,
 	);
+
 }
 
 sub _error {
@@ -102,69 +105,66 @@ sub _error {
     return undef;
 }
 
-sub _get_addr {
-    my($sock,$addr_str, $multi) = @_;
-    my @addr;
-
-    ## if ($multi && $addr_str !~ /^\d+(?:\.\d+){3}$/) {
-    if ($multi && $addr_str !~ /^[:\dAaBbCcFf]+$/) {
-       	(undef, undef, undef, undef, @addr) = getipnodebyname($addr_str,AF_INET6) ;
-    } else {
-	my $h = inet_pton(AF_INET6,$addr_str);
-	push (@addr,$h) if defined $h;
-    }
-    @addr;
-}
 
 sub configure {
     my($sock,$arg) = @_;
-    my($lport,$rport,$laddr,$raddr,$proto,$type);
+    my($lport,$rport,$laddr,$rpoty,$raddr,$family,$proto,$type); 
+    my($lres,$rres);
 
 
     $arg->{LocalAddr} = $arg->{LocalHost}
 	if exists $arg->{LocalHost} && !exists $arg->{LocalAddr};
 
+    #Syntax Parsing...
     ($laddr,$lport,$proto) = _sock_info($arg->{LocalAddr},
-					$arg->{LocalPort},
-					$arg->{Proto})
-			or return _error($sock, $!, $@);
+						     $arg->{LocalPort},
+						      $arg->{Proto})
+	                          or return _error($sock, $!, $@);
 
-    $laddr = defined $laddr ? inet_pton(AF_INET6,$laddr)
-			    : in6addr_any;
+    $laddr ||="";
+    $lport ||= "0";  
+    $family =  $arg->{Domain} || AF_UNSPEC;
+    $proto ||= (getprotobyname('tcp'))[2];
+    $type = $arg->{Type} || $socket_type{(getprotobynumber($proto))[0]};
 
-    return _error($sock, $EINVAL, "Bad hostname '",$arg->{LocalAddr},"'")
-	unless(defined $laddr);
+
+    my @lres = ();
+    @lres = getaddrinfo($laddr,$lport,$family,$type,$proto,AI_PASSIVE);
+
+    return _error($sock, $EINVAL, "Bad hostname ",$arg->{LocalAddr})
+	unless(scalar(@lres)>=5);
+
 
     $arg->{PeerAddr} = $arg->{PeerHost}
 	if exists $arg->{PeerHost} && !exists $arg->{PeerAddr};
 
     unless(exists $arg->{Listen}) {
-	($raddr,$rport,$proto) = _sock_info($arg->{PeerAddr},
-					    $arg->{PeerPort},
-					    $proto)
+    ($raddr,$rport,$proto) = _sock_info($arg->{PeerAddr},$arg->{PeerPort},
+						     $proto)
 			or return _error($sock, $!, $@);
     }
 
     $sock->blocking($arg->{Blocking}) if defined $arg->{Blocking};
 
-    $proto ||= (getprotobyname('tcp'))[2];
-
-    my $pname = (getprotobynumber($proto))[0];
-    $type = $arg->{Type} || $socket_type{$pname};
-
-    my @raddr = ();
-
-    if(defined $raddr) {
-	@raddr = $sock->_get_addr($raddr, $arg->{MultiHomed});
-	return _error($sock, $EINVAL, "Bad hostname '",$arg->{PeerAddr},"'")
-	    unless(@raddr);
+    
+    my @rres = ();
+     
+    if (defined $raddr) {
+    @rres = getaddrinfo($raddr,$rport,$family,$type,$proto,AI_PASSIVE);
+    return _error($sock, $EINVAL, "Bad hostname ",$arg->{PeerAddr})
+	    unless (scalar(@rres)>=5);
     }
 
-   
+
     while(1) {
 
-	$sock->socket(AF_INET6, $type, $proto) or
-	    return _error($sock, $!, "$!");
+	$family = (exists $arg->{PeerAddr})? ($rres[0]):($lres[0]) ;  # One concrete family.
+
+	#printf "DEBUG $family \n";
+	(undef,undef,undef,$lres,undef,@lres) =  @lres; 
+
+	$sock->socket($family, $type, $proto) or
+	    return _error($sock, $!, "$$!");
 
 	if ($arg->{Reuse} || $arg->{ReuseAddr}) {
 	    $sock->sockopt(SO_REUSEADDR,1) or
@@ -181,8 +181,8 @@ sub configure {
 		    return _error($sock, $!, "$!");
 	}
 
-	if($lport || ($laddr ne in6addr_any) || exists $arg->{Listen}) {
-	    $sock->bind($lport || 0, $laddr) or
+	if($lres || exists $arg->{Listen}) {
+	    $sock->bind($lres) or
 		    return _error($sock, $!, "$!");
 	}
 
@@ -195,28 +195,27 @@ sub configure {
  	# don't try to connect unless we're given a PeerAddr
  	last unless exists($arg->{PeerAddr});
 
-	$raddr = shift @raddr;
- 
-	return _error($sock, $EINVAL, 'Cannot determine remote port')
-		unless($rport || $type == SOCK_DGRAM || $type == SOCK_RAW);
-
+	(undef ,undef , undef, $rres,undef , @rres) = @rres;
+	
 	last
-	    unless($type == SOCK_STREAM || defined $raddr);
+	    unless($type == SOCK_STREAM || defined $rres);  
 
-	return _error($sock, $EINVAL, "Bad hostname '",$arg->{PeerAddr},"'")
-	    unless defined $raddr;
+#	return _error($sock, $EINVAL, "Bad hostname '",$arg->{PeerAddr},"'")
+#	    unless (defined $rres);
 
 #        my $timeout = ${*$sock}{'io_socket_timeout'};
 #        my $before = time() if $timeout;
-
+	
 	undef $@;
-        if ($sock->connect(pack_sockaddr_in6($rport, $raddr))) {
+        if ($sock->connect($rres)) {
 #            ${*$sock}{'io_socket_timeout'} = $timeout;
             return $sock;
         }
 
+#
+# GOOD !!!
 	return _error($sock, $!, $@ || "Timeout")
-	    unless (@raddr);
+	    unless ((scalar(@rres)>=5) && ($arg->{MultiHomed}));
 
 #	if ($timeout) {
 #	    my $new_timeout = $timeout - (time() - $before);
@@ -232,59 +231,65 @@ sub configure {
 }
 
 sub connect {
-    @_ == 2 || @_ == 3 or
-       croak 'usage: $sock->connect(NAME) or $sock->connect(PORT, ADDR)';
+    @_ == 2 or
+       croak 'usage: $sock->connect(NAME) ';
     my $sock = shift;
-    return $sock->SUPER::connect(@_ == 1 ? shift : pack_sockaddr_in6(@_));
+    return $sock->SUPER::connect( shift );
 }
 
 sub bind {
-    @_ == 2 || @_ == 3 or
-       croak 'usage: $sock->bind(NAME) or $sock->bind(PORT, ADDR)';
+    @_ == 2 or
+       croak 'usage: $sock->bind(NAME) '; 
     my $sock = shift;
-    return $sock->SUPER::bind(@_ == 1 ? shift : pack_sockaddr_in6(@_))
+    return $sock->SUPER::bind( shift );
 }
 
-sub sockaddr {
-    @_ == 1 or croak 'usage: $sock->sockaddr()';
-    my($sock) = @_;
-    my $name = $sock->sockname;
-    $name ? (sockaddr_in6($name))[1] : undef;
-}
+# 
+# This is to be deprecated , since 
+# they rely on  protocol-dependent data ADDR 
+#sub sockaddr {
+#    @_ == 1 or croak 'usage: $sock->sockaddr()';
+#    my($sock) = @_;
+#    my $name = $sock->sockname;
+#    $name ? (sockaddr_in6($name))[1] : undef;
+#}
 
 sub sockport {
     @_ == 1 or croak 'usage: $sock->sockport()';
     my($sock) = @_;
     my $name = $sock->sockname;
-    $name ? (sockaddr_in6($name))[0] : undef;
+    $name ? (getnameinfo($name,NI_NUMERICSERV))[1] : undef;
 }
 
 sub sockhost {
     @_ == 1 or croak 'usage: $sock->sockhost()';
     my($sock) = @_;
-    my $addr = $sock->sockaddr;
-    $addr ? inet_ntop(AF_INET6,$addr) : undef;
+    my $addr = $sock->sockname;
+    $addr ? (getnameinfo($addr,NI_NUMERICHOST))[0] : undef;
 }
 
-sub peeraddr {
-    @_ == 1 or croak 'usage: $sock->peeraddr()';
-    my($sock) = @_;
-    my $name = $sock->peername;
-    $name ? (sockaddr_in6($name))[1] : undef;
-}
+# 
+# This is to be deprecated , since 
+# they rely on  non protocol-independent data ADDR 
+#sub peeraddr {
+#    @_ == 1 or croak 'usage: $sock->peeraddr()';
+#    my($sock) = @_;
+#    my $name = $sock->peername;
+#    $name ? (sockaddr_in6($name))[1] : undef;
+#}
 
 sub peerport {
     @_ == 1 or croak 'usage: $sock->peerport()';
     my($sock) = @_;
     my $name = $sock->peername;
-    $name ? (sockaddr_in6($name))[0] : undef;
+    $name ? (getnameinfo($name,NI_NUMERICSERV))[1] : undef;
 }
 
 sub peerhost {
     @_ == 1 or croak 'usage: $sock->peerhost()';
     my($sock) = @_;
     my $addr = $sock->peeraddr;
-    $addr ? inet_ntop(AF_INET6,$addr) : undef;
+    $addr ? (getnameinfo($addr,NI_NUMERICHOST))[0] : undef;
 }
 
 1;
@@ -293,7 +298,7 @@ __END__
 
 =head1 NAME
 
-IO::Socket::INET6 - Object interface for AF_INET6 domain sockets
+IO::Socket::INET6 - Object interface for AF_INET|AF_INET6 domain sockets
 
 =head1 SYNOPSIS
 
@@ -302,7 +307,7 @@ IO::Socket::INET6 - Object interface for AF_INET6 domain sockets
 =head1 DESCRIPTION
 
 C<IO::Socket::INET6> provides an object interface to creating and using sockets
-in the AF_INET6 domain. It is built upon the L<IO::Socket> interface and
+in either AF_INET or AF_INET6 domains. It is built upon the L<IO::Socket> interface and
 inherits all the methods defined by L<IO::Socket>.
 
 =head1 CONSTRUCTOR
@@ -319,6 +324,7 @@ In addition to the key-value pairs accepted by L<IO::Socket>,
 C<IO::Socket::INET6> provides.
 
 
+    Domain	Address family               AF_INET | AF_INET6 | AF_UNSPEC (default)
     PeerAddr	Remote host address          <hostname>[:<port>]
     PeerHost	Synonym for PeerAddr
     PeerPort	Remote port or service       <service>[(<no>)] | <no>
@@ -345,12 +351,20 @@ which is in non-blocking mode is of little use. This is because the
 first connect will never fail with a timeout as the connect call
 will not block.
 
-The C<PeerAddr> can be a hostname or the IPv6-address on the
-"2001:800:40:2a05::10" form.  The C<PeerPort> can be a number or a symbolic
+The C<PeerAddr> can be a hostname,  the IPv6-address on the
+"2001:800:40:2a05::10" form , or the IPv4-address on the "213.34.234.245" form.
+The C<PeerPort> can be a number or a symbolic
 service name.  The service name might be followed by a number in
 parenthesis which is used if the service is not known by the system.
 The C<PeerPort> specification can also be embedded in the C<PeerAddr>
-by preceding it with a ":".
+by preceding it with a ":", and closing the IPv6 address on bracktes "[]" if
+necessary: "124.678.12.34:23","[2a05:345f::10]:23","any.server.com:23".
+
+If C<Domain> is not given, AF_UNSPEC is assumed, that is, both AF_INET and AF_INET6 will
+be both considered when resolving DNS names. AF_INET6 is prioritary.
+If you guess you are in trouble not reaching the peer,(the service is not available via
+AF_INET6 but AF_INET) you can either try Multihomed (try any address/family until reach)
+or concrete your address C<family> (AF_INET, AF_INET6).
 
 If C<Proto> is not given and you specify a symbolic C<PeerPort> port,
 then the constructor will try to derive C<Proto> from the service
@@ -368,6 +382,23 @@ Examples:
    $sock = IO::Socket::INET6->new(PeerAddr => 'www.perl.org',
                                  PeerPort => 'http(80)',
                                  Proto    => 'tcp');
+
+Suppose either you have no IPv6 connectivity or www.perl.org has no http service on IPv6. Then, 
+
+(Trying all address/families until reach)
+
+   $sock = IO::Socket::INET6->new(PeerAddr => 'www.perl.org',
+                                 PeerPort => 'http(80)',
+				 Multihomed => 1 ,
+                                 Proto    => 'tcp');
+
+(Concrete to IPv4 protocol)
+
+   $sock = IO::Socket::INET6->new(PeerAddr => 'www.perl.org',
+                                 PeerPort => 'http(80)',
+				 Domain => AF_INET ,
+                                 Proto    => 'tcp');
+
 
    $sock = IO::Socket::INET6->new(PeerAddr => 'localhost:smtp(25)');
 
@@ -398,10 +429,6 @@ by default. This was not the case with earlier releases.
 
 =over 4
 
-=item sockaddr ()
-
-Return the address part of the sockaddr structure for the socket
-
 =item sockport ()
 
 Return the port number that the socket is using on the local host
@@ -409,12 +436,7 @@ Return the port number that the socket is using on the local host
 =item sockhost ()
 
 Return the address part of the sockaddr structure for the socket in a
-text form "2001:800:40:2a05::10"
-
-=item peeraddr ()
-
-Return the address part of the sockaddr structure for the socket on
-the peer host
+text form ("2001:800:40:2a05::10" or "245.245.13.27")
 
 =item peerport ()
 
@@ -423,7 +445,7 @@ Return the port number for the socket on the peer host.
 =item peerhost ()
 
 Return the address part of the sockaddr structure for the socket on the
-peer host in a text form "2001:800:40:2a05::10"
+peer host in a text form ("2001:800:40:2a05::10" or "245.245.13.27")
 
 =back
 

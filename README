@@ -2,7 +2,7 @@ IO::Socket::INET6
 
 1. Abstract
 IO::Socket::INET6 provides an object interface to creating and using sockets
-in the AF_INET6 domain. It is built upon the IO::Socket interface and
+in both AF_INET|AF_INET6 domain. It is built upon the IO::Socket interface and
 inherits all the methods defined by IO::Socket.
 
 2. Install
@@ -10,9 +10,6 @@ inherits all the methods defined by IO::Socket.
   % make
   % make test
   # make install
-
-  * 'make test' bind to port 20080. If you already use port 20080, please
-    change it in t/io_sock_inet6.t.
 
 3. AUTHOR and COPYRIGHT
 This program is based on IO::Socket::INET by Graham Barr <gbarr@pobox.com>
