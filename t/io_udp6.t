@@ -49,8 +49,15 @@ sub compare_addr {
 	}
 	return 0;
     }
+    # IO::Socket carps on errors if Perl's -w flag is
+    # turned on.
+    my $old_wflag = $^W;
+    $^W = 0;
+
     my @a = getnameinfo($a,NI_NUMERICHOST | NI_NUMERICSERVER);
     my @b = getnameinfo($b,NI_NUMERICHOST | NI_NUMERICSERVER);
+
+    $^W=$old_wflag;
     "$a[0]$a[1]" eq "$b[0]$b[1]";
 }
 

@@ -7,9 +7,6 @@
 # Modified by Rafael Martinez-Torres <rafael.martinez@novagnet.com>
 # Euro6IX project (www.euro6ix.org) 2003.
 
-# Habrá que tocar algo de los metodos redefinidos por Socket
-# Los UDP no van nada bien.
-
 package IO::Socket::INET6;
 
 use strict;
@@ -22,7 +19,7 @@ use Exporter;
 use Errno;
 
 @ISA = qw(IO::Socket);
-$VERSION = "2.00";
+$VERSION = "2.01";
 #Purpose: allow protocol independent protocol and original interface.
 
 my $EINVAL = exists(&Errno::EINVAL) ? Errno::EINVAL() : 1;
@@ -49,11 +46,19 @@ sub _sock_info {
   my @proto = ();  
   my @serv = ();
 
-
- $port = $1 
-	if(defined $addr && $addr =~ s,:([\w\(\)/^\]]+)$,,);   # Make sure the symbol ":" does not belong to the IPv6 address.
-  # Trailing eventual brackets from IPv6 address;
-  $addr =~ s/[\[\]]//g if defined $addr;
+  if (defined $addr) {
+	if (!inet_pton(AF_INET6,$addr)) {
+         if($addr =~ s,^\[([\da-fA-F:]+)\]:([\w\(\)/]+)$,$1,) {
+   	     $port = $2;
+         } elsif($addr =~ s,^\[(::[\da-fA-F.:]+)\]:([\w\(\)/]+)$,$1,) {
+             $port = $2;
+         } elsif($addr =~ s,^\[([\da-fA-F:]+)\],$1,) {
+             $port = $origport;
+         } elsif($addr =~ s,:([\w\(\)/]+)$,,) {
+             $port = $1
+         }
+	}
+  }
 
   # $proto as "string".
   if(defined $proto  && $proto =~ /\D/) {
@@ -288,8 +293,8 @@ sub peerport {
 sub peerhost {
     @_ == 1 or croak 'usage: $sock->peerhost()';
     my($sock) = @_;
-    my $addr = $sock->peeraddr;
-    $addr ? (getnameinfo($addr,NI_NUMERICHOST))[0] : undef;
+    my $name = $sock->peername;
+    $name ? (getnameinfo($name,NI_NUMERICHOST))[0] : undef;
 }
 
 1;

@@ -1,3 +1,12 @@
+2003-12-12  Rafael Martinez Torres <rafael.martinez@novagnet.com>
+
+	* New Release INET6-2.01 .
+	* Patch from Wouter de Jong <wouter@widexs.nl>
+	  - fixing the parser on regexp at sock_info()
+	* Patch from Olaf M.Kolkman <olaf@ripe.net>
+	  - Toggle the -w flag to avoid some warning messages around tests
+	* fixing peerhost method.
+
 2003-11-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
 
 	* New Release INET6-2.00 . Protocol independent IPv4-IPv6.
