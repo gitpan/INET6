@@ -18,7 +18,7 @@ use Exporter;
 use Errno;
 
 @ISA = qw(IO::Socket);
-$VERSION = "1.27";
+$VERSION = "1.28";
 
 my $EINVAL = exists(&Errno::EINVAL) ? Errno::EINVAL() : 1;
 
@@ -42,7 +42,7 @@ sub _sock_info {
   my @serv = ();
 
   if (defined $addr) {
-     if(!inet_pton(AF_INET6, $addr)) {
+	if (!inet_pton(AF_INET6,$addr)) {
          if($addr =~ s,^\[([\da-fA-F:]+)\]:([\w\(\)/]+)$,$1,) {
    	     $port = $2;
          } elsif($addr =~ s,^\[(::[\da-fA-F.:]+)\]:([\w\(\)/]+)$,$1,) {
@@ -52,7 +52,7 @@ sub _sock_info {
          } elsif($addr =~ s,:([\w\(\)/]+)$,,) {
              $port = $1
          }
-     }
+	}
   }
 
   if(defined $proto  && $proto =~ /\D/) {
@@ -103,19 +103,15 @@ sub _error {
 }
 
 sub _get_addr {
-    my($sock, $addr_str, $port, $type, $multi) = @_;
+    my($sock,$addr_str, $multi) = @_;
     my @addr;
 
-    if ($addr_str !~ /^\d+(?:\.\d+){3}$/) {
-	@addr = getaddrinfo($addr_str, $port, AF_UNSPEC, $type, (AI_CANONNAME | AI_NUMERICHOST));
+    ## if ($multi && $addr_str !~ /^\d+(?:\.\d+){3}$/) {
+    if ($multi && $addr_str !~ /^[:\dAaBbCcFf]+$/) {
+       	(undef, undef, undef, undef, @addr) = getipnodebyname($addr_str,AF_INET6) ;
     } else {
-	@addr = getaddrinfo($addr_str, $port, AF_INET, $type, (AI_NUMERICHOST| AI_CANONNAME));
-    }
-
-    if (!$multi) {
-	my($family, $type, $protocol, $saddr, $canonname);
-	($family, $type, $protocol, $saddr, $canonname, @addr) = @addr;
-	@addr = ($family, $type, $protocol, $saddr, $canonname);
+	my $h = inet_pton(AF_INET6,$addr_str);
+	push (@addr,$h) if defined $h;
     }
     @addr;
 }
@@ -133,8 +129,7 @@ sub configure {
 					$arg->{Proto})
 			or return _error($sock, $!, $@);
 
-    # Hack: localhost doesnot seem to reolve in IPv6.
-    $laddr = (defined $laddr) && ($laddr ne 'localhost') ? inet_pton(AF_INET6,$laddr)
+    $laddr = defined $laddr ? inet_pton(AF_INET6,$laddr)
 			    : in6addr_any;
 
     return _error($sock, $EINVAL, "Bad hostname '",$arg->{LocalAddr},"'")
@@ -157,24 +152,18 @@ sub configure {
     my $pname = (getprotobynumber($proto))[0];
     $type = $arg->{Type} || $socket_type{$pname};
 
-    my @addr = ();
+    my @raddr = ();
 
     if(defined $raddr) {
-	@addr = $sock->_get_addr($raddr, $rport, $type, $arg->{MultiHomed});
+	@raddr = $sock->_get_addr($raddr, $arg->{MultiHomed});
 	return _error($sock, $EINVAL, "Bad hostname '",$arg->{PeerAddr},"'")
-	    unless(scalar(@addr) >= 5);
-    }
-    else {
-	@addr = $sock->_get_addr($laddr, $lport, $type, $arg->{MultiHomed});
-	return _error($sock, $EINVAL, "Bad hostname '",$arg->{LocalAddr},"'")
-	    unless(scalar(@addr) >= 5);
+	    unless(@raddr);
     }
 
+   
     while(1) {
-	my ($family, $type, $protocol, $saddr, $canonname);
-	($family, $type, $protocol, $saddr, $canonname, @addr) = @addr;
 
-	$sock->socket($family, $type, $protocol) or
+	$sock->socket(AF_INET6, $type, $proto) or
 	    return _error($sock, $!, "$!");
 
 	if ($arg->{Reuse} || $arg->{ReuseAddr}) {
@@ -205,6 +194,8 @@ sub configure {
 
  	# don't try to connect unless we're given a PeerAddr
  	last unless exists($arg->{PeerAddr});
+
+	$raddr = shift @raddr;
  
 	return _error($sock, $EINVAL, 'Cannot determine remote port')
 		unless($rport || $type == SOCK_DGRAM || $type == SOCK_RAW);
@@ -219,14 +210,13 @@ sub configure {
 #        my $before = time() if $timeout;
 
 	undef $@;
-#        if ($sock->connect(pack_sockaddr_in6($rport, $raddr))) {
+        if ($sock->connect(pack_sockaddr_in6($rport, $raddr))) {
 #            ${*$sock}{'io_socket_timeout'} = $timeout;
-	if ($sock->connect($saddr)) {
             return $sock;
         }
 
 	return _error($sock, $!, $@ || "Timeout")
-	    unless (scalar(@addr) >= 5);
+	    unless (@raddr);
 
 #	if ($timeout) {
 #	    my $new_timeout = $timeout - (time() - $before);
@@ -356,7 +346,7 @@ first connect will never fail with a timeout as the connect call
 will not block.
 
 The C<PeerAddr> can be a hostname or the IPv6-address on the
-"xx:xx:xx:xx" form.  The C<PeerPort> can be a number or a symbolic
+"2001:800:40:2a05::10" form.  The C<PeerPort> can be a number or a symbolic
 service name.  The service name might be followed by a number in
 parenthesis which is used if the service is not known by the system.
 The C<PeerPort> specification can also be embedded in the C<PeerAddr>
@@ -419,7 +409,7 @@ Return the port number that the socket is using on the local host
 =item sockhost ()
 
 Return the address part of the sockaddr structure for the socket in a
-text form xx:xx:xx:xx
+text form "2001:800:40:2a05::10"
 
 =item peeraddr ()
 
@@ -433,7 +423,7 @@ Return the port number for the socket on the peer host.
 =item peerhost ()
 
 Return the address part of the sockaddr structure for the socket on the
-peer host in a text form xx:xx:xx:xx
+peer host in a text form "2001:800:40:2a05::10"
 
 =back
 

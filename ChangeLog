@@ -1,3 +1,9 @@
+2003-07-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
+
+	* New Release INET6-1.28
+	* Makefile.PL includes prerequisites: (min.) Socket6 0.12
+	* Fix _get_addr in INET6.pm to use Socket6::getipnodebyname.
+
 2003-06-24  Rafael Martinez Torres <rafael.martinez@novagnet.com>
 
 	* New Release INET6-1.27.
